@@ -1,9 +1,9 @@
-
 import React, { useState } from "react";
 import { saveAs } from "file-saver";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { type EdfHeader, createModifiedEdfFile } from "@/utils/edfParser";
 import { FilePen, Save } from "lucide-react";
+import { toast } from "sonner";
 
 interface HeaderEditorProps {
   header: EdfHeader;
@@ -25,6 +26,8 @@ const HeaderEditor: React.FC<HeaderEditorProps> = ({
 }) => {
   const [header, setHeader] = useState<EdfHeader>(initialHeader);
   const [isSaving, setIsSaving] = useState(false);
+  const [fileName, setFileName] = useState(originalFileName);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const updateHeader = <K extends keyof EdfHeader>(
     field: K, 
@@ -56,21 +59,24 @@ const HeaderEditor: React.FC<HeaderEditorProps> = ({
     });
   };
 
-  const handleSave = async () => {
+  const handleSave = async (customFileName?: string) => {
     setIsSaving(true);
     try {
       const modifiedBuffer = createModifiedEdfFile(originalBuffer, header);
       const blob = new Blob([modifiedBuffer], { type: "application/octet-stream" });
       
-      // Create a file name for the modified file
-      const filenameParts = originalFileName.split('.');
+      const filenameParts = (customFileName || originalFileName).split('.');
       const extension = filenameParts.pop();
       const baseName = filenameParts.join('.');
       const newFileName = `${baseName}_modified.${extension}`;
       
       saveAs(blob, newFileName);
+      
+      toast.success(`File salvato come ${newFileName}`);
+      setIsDialogOpen(false);
     } catch (error) {
-      console.error("Error saving file:", error);
+      console.error("Errore durante il salvataggio del file:", error);
+      toast.error("Impossibile salvare il file");
     } finally {
       setIsSaving(false);
     }
@@ -82,21 +88,54 @@ const HeaderEditor: React.FC<HeaderEditorProps> = ({
         <div>
           <h2 className="text-2xl font-bold flex items-center gap-2">
             <FilePen className="h-6 w-6" />
-            EDF Header Editor
+            Editor Header EDF
           </h2>
           <p className="text-gray-500 mt-1">
-            View and modify the header information of your EDF file
+            Visualizza e modifica le informazioni dell'header del file EDF
           </p>
         </div>
         
-        <Button 
-          onClick={handleSave} 
-          disabled={isSaving}
-          className="gap-2"
-        >
-          <Save className="h-4 w-4" />
-          {isSaving ? "Saving..." : "Save Modified EDF"}
-        </Button>
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <DialogTrigger asChild>
+            <Button 
+              disabled={isSaving}
+              className="gap-2"
+            >
+              <Save className="h-4 w-4" />
+              Salva con nome
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Salva file modificato</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="saveFileName">Nome file</Label>
+                <Input 
+                  id="saveFileName"
+                  value={fileName}
+                  onChange={(e) => setFileName(e.target.value)}
+                  placeholder="Inserisci nome file"
+                />
+              </div>
+              <div className="flex justify-end space-x-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setIsDialogOpen(false)}
+                >
+                  Annulla
+                </Button>
+                <Button 
+                  onClick={() => handleSave(fileName)}
+                  disabled={!fileName.trim()}
+                >
+                  Salva
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
       
       <Separator />
