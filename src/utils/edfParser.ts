@@ -1,4 +1,3 @@
-
 /**
  * Utility functions for parsing and manipulating EDF (European Data Format) files
  */
@@ -25,6 +24,14 @@ export interface EdfHeader {
   prefiltering: string[];
   samplesPerRecord: number[];
   reserved2: string[];
+}
+
+// Interface for respiratory data
+export interface RespiratoryData {
+  times: number[];
+  values: number[];
+  label: string;
+  unit: string;
 }
 
 /**
@@ -152,6 +159,96 @@ export const parseEdfHeader = (buffer: ArrayBuffer): EdfHeader => {
 };
 
 /**
+ * Extract respiratory data from EDF file
+ * @param buffer ArrayBuffer containing EDF data
+ * @param header Parsed EDF header
+ * @returns Object containing respiratory data series
+ */
+export const extractRespiratoryData = (buffer: ArrayBuffer, header: EdfHeader): RespiratoryData[] => {
+  const respiratoryChannels: RespiratoryData[] = [];
+  const dataView = new DataView(buffer);
+  
+  // Find respiratory channels (typically labeled as RESP, FLOW, or similar)
+  const respiratoryIndices = header.labels
+    .map((label, index) => {
+      const lowerLabel = label.toLowerCase().trim();
+      return {
+        index,
+        isRespiratory: lowerLabel.includes('resp') || 
+                       lowerLabel.includes('flow') || 
+                       lowerLabel.includes('thorax') || 
+                       lowerLabel.includes('abdom') ||
+                       lowerLabel.includes('breath')
+      };
+    })
+    .filter(item => item.isRespiratory)
+    .map(item => item.index);
+  
+  if (respiratoryIndices.length === 0) {
+    // If no clearly labeled respiratory channels found, use first channel as default
+    respiratoryIndices.push(0);
+  }
+  
+  // Calculate header size and data offset
+  const headerSize = header.bytesInHeader;
+  
+  // Extract data for each respiratory channel
+  for (const channelIndex of respiratoryIndices) {
+    const numSamples = header.samplesPerRecord[channelIndex];
+    const label = header.labels[channelIndex].trim();
+    const unit = header.physicalDimensions[channelIndex].trim();
+    const digitalMin = header.digitalMins[channelIndex];
+    const digitalMax = header.digitalMaxs[channelIndex];
+    const physicalMin = header.physicalMins[channelIndex];
+    const physicalMax = header.physicalMaxs[channelIndex];
+    
+    const values: number[] = [];
+    const times: number[] = [];
+    
+    // Calculate sample offset for this channel
+    let sampleOffsetInRecord = 0;
+    for (let i = 0; i < channelIndex; i++) {
+      sampleOffsetInRecord += header.samplesPerRecord[i];
+    }
+    
+    // Read values for each data record
+    let dataOffset = headerSize;
+    
+    for (let record = 0; record < Math.min(header.numDataRecords, 10); record++) {
+      const recordOffset = dataOffset + record * 2 * sampleOffsetInRecord;
+      
+      for (let sample = 0; sample < numSamples; sample++) {
+        // Read 2-byte sample
+        const sampleOffset = recordOffset + sample * 2;
+        if (sampleOffset + 2 <= buffer.byteLength) {
+          const digitalValue = dataView.getInt16(sampleOffset, true); // little endian
+          
+          // Convert to physical value using scaling from header
+          const physicalValue = physicalMin + (digitalValue - digitalMin) * 
+            (physicalMax - physicalMin) / (digitalMax - digitalMin);
+          
+          values.push(physicalValue);
+          
+          // Calculate timestamp (in seconds)
+          const time = (record * header.durationOfDataRecord) + 
+            (sample / numSamples) * header.durationOfDataRecord;
+          times.push(time);
+        }
+      }
+    }
+    
+    respiratoryChannels.push({
+      label,
+      unit,
+      values,
+      times
+    });
+  }
+  
+  return respiratoryChannels;
+};
+
+/**
  * Create a modified EDF file with updated header
  */
 export const createModifiedEdfFile = (originalBuffer: ArrayBuffer, updatedHeader: EdfHeader): ArrayBuffer => {
@@ -253,6 +350,69 @@ export const createModifiedEdfFile = (originalBuffer: ArrayBuffer, updatedHeader
   for (let i = 0; i < updatedHeader.numSignals; i++) {
     writeAsciiString(updatedHeader.reserved2[i] || '', offset, 32);
     offset += 32;
+  }
+  
+  return resultBuffer;
+};
+
+/**
+ * Create a modified EDF file with updated respiratory data
+ */
+export const updateRespiratoryDataInFile = (
+  originalBuffer: ArrayBuffer, 
+  header: EdfHeader,
+  channelIndex: number,
+  newValues: number[]
+): ArrayBuffer => {
+  // Create a copy of the original buffer
+  const resultBuffer = new ArrayBuffer(originalBuffer.byteLength);
+  new Uint8Array(resultBuffer).set(new Uint8Array(originalBuffer));
+  const dataView = new DataView(resultBuffer);
+  
+  // Calculate header size
+  const headerSize = header.bytesInHeader;
+  
+  // Get scaling factors for the selected channel
+  const digitalMin = header.digitalMins[channelIndex];
+  const digitalMax = header.digitalMaxs[channelIndex];
+  const physicalMin = header.physicalMins[channelIndex];
+  const physicalMax = header.physicalMaxs[channelIndex];
+  
+  // Calculate sample offset for this channel
+  let sampleOffsetInRecord = 0;
+  for (let i = 0; i < channelIndex; i++) {
+    sampleOffsetInRecord += header.samplesPerRecord[i];
+  }
+  
+  // Number of samples for this channel
+  const numSamples = header.samplesPerRecord[channelIndex];
+  
+  // Calculate how many values we can update (min of provided values and actual samples)
+  const valuesToUpdate = Math.min(
+    newValues.length,
+    numSamples * Math.min(header.numDataRecords, 10)
+  );
+  
+  // Update values
+  for (let i = 0; i < valuesToUpdate; i++) {
+    // Calculate record and sample index
+    const record = Math.floor(i / numSamples);
+    const sample = i % numSamples;
+    
+    // Convert physical value to digital value
+    const physicalValue = newValues[i];
+    const digitalValue = Math.round(digitalMin + (physicalValue - physicalMin) * 
+      (digitalMax - digitalMin) / (physicalMax - physicalMin));
+    
+    // Calculate offset in buffer
+    const dataOffset = headerSize;
+    const recordOffset = dataOffset + record * 2 * sampleOffsetInRecord;
+    const sampleOffset = recordOffset + sample * 2;
+    
+    if (sampleOffset + 2 <= resultBuffer.byteLength) {
+      // Write 2-byte sample
+      dataView.setInt16(sampleOffset, digitalValue, true); // little endian
+    }
   }
   
   return resultBuffer;

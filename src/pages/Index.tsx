@@ -1,10 +1,12 @@
+
 import React, { useState } from "react";
 import { Toaster } from "sonner";
 import { toast } from "sonner";
 import FileUploader from "@/components/FileUploader";
 import HeaderEditor from "@/components/HeaderEditor";
 import InfoModal from "@/components/InfoModal";
-import { parseEdfHeader, type EdfHeader } from "@/utils/edfParser";
+import RespiratoryDataViewer from "@/components/RespiratoryDataViewer";
+import { parseEdfHeader, type EdfHeader, extractRespiratoryData, updateRespiratoryDataInFile, type RespiratoryData } from "@/utils/edfParser";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { 
@@ -16,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Info } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -23,7 +26,8 @@ const Index = () => {
   const [originalBuffer, setOriginalBuffer] = useState<ArrayBuffer | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false);
-
+  const [respiratoryData, setRespiratoryData] = useState<RespiratoryData[]>([]);
+  
   const handleFileLoaded = async (file: File, buffer: ArrayBuffer) => {
     setIsLoading(true);
     try {
@@ -37,12 +41,47 @@ const Index = () => {
       setEdfHeader(header);
       setOriginalBuffer(buffer);
       setFileName(file.name);
+      
+      // Extract respiratory data
+      const respData = extractRespiratoryData(buffer, header);
+      setRespiratoryData(respData);
+      
       toast.success("EDF file successfully loaded");
     } catch (error) {
       console.error("Error parsing EDF header:", error);
       toast.error("Failed to parse EDF header. Is this a valid EDF file?");
     } finally {
       setIsLoading(false);
+    }
+  };
+  
+  const handleRespiratoryDataUpdate = (channelIndex: number, newValues: number[]) => {
+    if (!originalBuffer || !edfHeader) return;
+    
+    try {
+      // Update the respiratory data in the file
+      const updatedBuffer = updateRespiratoryDataInFile(
+        originalBuffer,
+        edfHeader,
+        channelIndex,
+        newValues
+      );
+      
+      // Update state
+      setOriginalBuffer(updatedBuffer);
+      
+      // Update the respiratory data display
+      const updatedRespData = [...respiratoryData];
+      updatedRespData[channelIndex] = {
+        ...updatedRespData[channelIndex],
+        values: newValues
+      };
+      setRespiratoryData(updatedRespData);
+      
+      toast.success("Dati respiratori aggiornati con successo");
+    } catch (error) {
+      console.error("Error updating respiratory data:", error);
+      toast.error("Si è verificato un errore durante l'aggiornamento dei dati respiratori");
     }
   };
 
@@ -89,11 +128,27 @@ const Index = () => {
           </Card>
         ) : (
           <div className="max-w-6xl mx-auto">
-            <HeaderEditor 
-              header={edfHeader} 
-              originalBuffer={originalBuffer!}
-              originalFileName={fileName}
-            />
+            <Tabs defaultValue="header">
+              <TabsList className="mb-6">
+                <TabsTrigger value="header">Modifica Header</TabsTrigger>
+                <TabsTrigger value="respiratory">Dati Respiratori</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="header">
+                <HeaderEditor 
+                  header={edfHeader} 
+                  originalBuffer={originalBuffer!}
+                  originalFileName={fileName}
+                />
+              </TabsContent>
+              
+              <TabsContent value="respiratory">
+                <RespiratoryDataViewer 
+                  respiratoryData={respiratoryData}
+                  onDataUpdate={handleRespiratoryDataUpdate}
+                />
+              </TabsContent>
+            </Tabs>
 
             <div className="flex justify-center mt-8">
               <button
@@ -101,6 +156,7 @@ const Index = () => {
                   setEdfHeader(null);
                   setOriginalBuffer(null);
                   setFileName("");
+                  setRespiratoryData([]);
                 }}
                 className="text-blue-500 hover:text-blue-700 text-sm underline"
               >
