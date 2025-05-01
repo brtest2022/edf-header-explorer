@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import { Toaster } from "sonner";
 import { toast } from "sonner";
@@ -146,6 +145,7 @@ const Index = () => {
                 <RespiratoryDataViewer 
                   respiratoryData={respiratoryData}
                   onDataUpdate={handleRespiratoryDataUpdate}
+                  header={edfHeader}
                 />
               </TabsContent>
             </Tabs>

@@ -59,9 +59,44 @@ const HeaderEditor: React.FC<HeaderEditorProps> = ({
     });
   };
 
+  const updateFileMetadata = () => {
+    // Ottiene la data e l'ora corrente dal file EDF
+    const startDate = header.startDate; // Formato dd.mm.yy
+    const startTime = header.startTime; // Formato hh.mm.ss
+
+    // Estrae le parti della data
+    const dateParts = startDate.split('.');
+    if (dateParts.length === 3) {
+      const day = dateParts[0];
+      const month = dateParts[1];
+      const year = dateParts[2];
+      
+      // Estrae le parti dell'ora
+      const timeParts = startTime.split('.');
+      if (timeParts.length === 3) {
+        const hour = timeParts[0];
+        const minute = timeParts[1];
+        const second = timeParts[2];
+        
+        // Aggiorna il recordId con le informazioni di data e ora
+        // Il formato tipico del recordId include informazioni di data e ora
+        const newRecordId = `${header.patientId.trim()} ${day}.${month}.${year} ${hour}.${minute}.${second} Modificato`;
+        updateHeader("recordId", newRecordId);
+        
+        // Per aggiornare anche altri campi nei metadati dell'header
+        // ad esempio potremmo aggiornare il campo reserved per includere un timestamp
+        const timestamp = `Modified: ${day}.${month}.${year} ${hour}.${minute}.${second}`;
+        updateHeader("reserved", timestamp);
+      }
+    }
+  };
+
   const handleSave = async (customFileName?: string) => {
     setIsSaving(true);
     try {
+      // Aggiorna i metadati del file prima di salvare
+      updateFileMetadata();
+      
       const modifiedBuffer = createModifiedEdfFile(originalBuffer, header);
       const blob = new Blob([modifiedBuffer], { type: "application/octet-stream" });
       
@@ -73,6 +108,7 @@ const HeaderEditor: React.FC<HeaderEditorProps> = ({
       saveAs(blob, newFileName);
       
       toast.success(`File salvato come ${newFileName}`);
+      toast.info(`Metadati del file aggiornati con data e ora: ${header.startDate} ${header.startTime}`);
       setIsDialogOpen(false);
     } catch (error) {
       console.error("Errore durante il salvataggio del file:", error);
